@@ -1,0 +1,104 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify active Java version
+        run: java -version
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Verify Gradle version
+        run: gradle --version
+
+      - name: Generate temporary debug keystore
+        run: |
+          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        id: release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v1.0.${{ github.run_number }}-${{ github.run_attempt }}"
+          ASSET_NAME="app-debug-${{ github.run_number }}-${{ github.run_attempt }}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$ASSET_NAME"
+          
+          gh release create "$TAG_NAME" \
+            --target "${{ github.sha }}" \
+            --title "Ashu Super App Debug v1.0.${{ github.run_number }}" \
+            --notes "Automated debug APK build for Ashu Super App." \
+            --latest \
+            "$ASSET_NAME#AshuSuperApp-debug.apk"
+
+      - name: Report APK download result
+        id: report
+        always: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v1.0.${{ github.run_number }}-${{ github.run_attempt }}"
+          ASSET_NAME="app-debug-${{ github.run_number }}-${{ github.run_attempt }}.apk"
+          
+          if [ "${{ steps.release.outcome }}" == "success" ]; then
+            echo "Release publishing succeeded!"
+            gh release view "$TAG_NAME"
+            echo "Release Tag: $TAG_NAME"
+            RELEASE_TITLE=$(gh release view "$TAG_NAME" --json name --jq .name)
+            echo "Release Title: $RELEASE_TITLE"
+            RELEASE_URL=$(gh release view "$TAG_NAME" --json url --jq .url)
+            echo "Release URL: $RELEASE_URL"
+            echo "Asset Filename: AshuSuperApp-debug.apk"
+            
+            {
+              echo "### 🚀 GitHub Release Published Successfully"
+              echo "- **Release Tag**: \`$TAG_NAME\`"
+              echo "- **Release Title**: $RELEASE_TITLE"
+              echo "- **Release Page URL**: [$RELEASE_URL]($RELEASE_URL)"
+              echo "- **Direct APK Asset**: \`AshuSuperApp-debug.apk\`"
+              echo ""
+              echo "The APK can be downloaded directly from the release Assets section above."
+              echo "Note: The standard Actions artifact named \`app-debug-apk\` is also available as a backup."
+            } >> $GITHUB_STEP_SUMMARY
+          else
+            echo "::warning::GitHub Release publishing failed or skipped, but APK build and Actions artifact upload succeeded."
+            {
+              echo "### ⚠️ GitHub Release Publishing Notice"
+              echo "Release publishing encountered an issue or was skipped, but **the APK build succeeded**."
+              echo "- The Actions artifact named **\`app-debug-apk\`** remains available in the workflow run summary."
+              echo "- You can download the built APK directly from the workflow artifacts."
+            } >> $GITHUB_STEP_SUMMARY
+          fi

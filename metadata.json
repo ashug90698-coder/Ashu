@@ -1,0 +1,6 @@
+{
+  "name": "Ashu Super App",
+  "description": "All-in-one Super App featuring Ashu YouTube, Deepu WhatsApp, PhonePe, Facebook, Google, and direct web links.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
